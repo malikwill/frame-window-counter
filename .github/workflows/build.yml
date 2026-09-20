@@ -16,8 +16,9 @@ jobs:
           - name: Android64
             os: ubuntu-latest
             target: Android64
-          # Uncomment if you also want 32-bit Android builds
-          # (make sure to add an "android32" entry under "gd" in mod.json first)
+          # Uncomment if you also want 32-bit Android builds too
+          # (both android32 and android64 share the same "android" key in mod.json,
+          # so no mod.json change is needed to add this)
           # - name: Android32
           #   os: ubuntu-latest
           #   target: Android32
@@ -29,6 +30,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # ubuntu-latest's preinstalled CMake is too old for one of the mod's
+      # transitive deps (matjson's msgpack backend needs CMake >= 4.1).
+      # windows-latest already ships a new enough CMake, so this only runs on Linux.
+      - name: Upgrade CMake (Linux runners only)
+        if: runner.os == 'Linux'
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: 'latest'
 
       - name: Build the mod
         uses: geode-sdk/build-geode-mod@main
