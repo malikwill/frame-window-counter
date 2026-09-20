@@ -3,13 +3,10 @@
 #include "../Data/State.hpp"
 #include "../Common.hpp"
 #include <Geode/ui/ColorPickPopup.hpp>
+#include <Geode/utils/file.hpp>
+#include <Geode/utils/async.hpp>
 #include <thread>
 #include <set>
-
-#ifdef GEODE_IS_WINDOWS
-#include <windows.h>
-#include <commdlg.h>
-#endif
 
 using namespace geode::prelude;
 
@@ -313,43 +310,27 @@ void LabelPresetPopup::onApplyColorToWins(CCObject*) {
 }
 
 void LabelPresetPopup::onBrowseAudio(CCObject*) {
-#ifdef GEODE_IS_WINDOWS
     Ref<LabelPresetPopup> safeThis = this;
 
-    HWND parentHwnd = GetActiveWindow();
-    if (!parentHwnd) {
-        parentHwnd = WindowFromDC(wglGetCurrentDC());
-    }
+    file::FilePickOptions options;
+    options.filters = {
+        { .description = "Audio Files", .files = { "*.ogg", "*.mp3", "*.wav" } }
+    };
 
-    std::thread([safeThis, parentHwnd]() {
-        HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    async::spawn(
+        file::pick(file::PickMode::OpenFile, options),
+        [safeThis](Result<std::optional<std::filesystem::path>> result) {
+            if (!result.isOk()) return;
+            auto opt = result.unwrap();
+            if (!opt.has_value()) return; // user cancelled the dialog
 
-        char filename[MAX_PATH] = { 0 };
-        OPENFILENAMEA ofn;
-        ZeroMemory(&ofn, sizeof(ofn));
-        ofn.lStructSize = sizeof(ofn);
-        ofn.hwndOwner = parentHwnd;
-        ofn.lpstrFilter = "Audio Files (*.ogg;*.mp3;*.wav)\0*.ogg;*.mp3;*.wav\0All Files (*.*)\0*.*\0";
-        ofn.lpstrFile = filename;
-        ofn.nMaxFile = MAX_PATH;
-        ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR;
-        ofn.lpstrDefExt = "ogg";
-
-        if (GetOpenFileNameA(&ofn)) {
-            std::string pathStr(filename);
-            geode::Loader::get()->queueInMainThread([safeThis, pathStr]() {
-                if (safeThis && safeThis->getParent() && safeThis->m_audioInput) {
-                    safeThis->m_audioInput->setString(pathStr);
-                    safeThis->autoSave();
-                }
-                });
+            std::string pathStr = opt.value().string();
+            if (safeThis && safeThis->getParent() && safeThis->m_audioInput) {
+                safeThis->m_audioInput->setString(pathStr);
+                safeThis->autoSave();
+            }
         }
-
-        if (SUCCEEDED(hr)) {
-            CoUninitialize();
-        }
-        }).detach();
-#endif
+    );
 }
 
 void LabelPresetPopup::onColorBtn(CCObject*) {
