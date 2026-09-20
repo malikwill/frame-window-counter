@@ -1,4 +1,4 @@
-# Frame Window Counter
+# Frame Window Counter [ANDROID VER.]
 
 A comprehensive frame window tracking, HUD customization, and $L^*$ (NaNDL Precision) calculation toolkit for **Geometry Dash** (Geode).
 
