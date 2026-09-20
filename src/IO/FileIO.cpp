@@ -8,51 +8,30 @@
 #include <filesystem>
 #include <algorithm>
 #include <span>
-
-#ifdef GEODE_IS_WINDOWS
-#include <windows.h>
-#include <commdlg.h>
-#include <objbase.h>
-#endif
+#include <Geode/utils/file.hpp>
+#include <Geode/utils/async.hpp>
 
 using namespace geode::prelude;
 
 namespace FileIO {
 
-    void exportFWC() {
-#ifdef GEODE_IS_WINDOWS
-        std::vector<FrameAction> exportList;
-        for (auto& [k, v] : g_frameActions) exportList.push_back(v);
+    // Shared save-dialog filters: cross-platform (desktop native dialogs, Android SAF).
+    static std::vector<file::FilePickOptions::Filter> exportFilters() {
+        return {
+            { .description = "Frame Window Counter", .files = { "*.fwc" } },
+            { .description = "NANDL Calculator JSON", .files = { "*.json" } }
+        };
+    }
 
-        std::stable_sort(exportList.begin(), exportList.end(), [](const FrameAction& a, const FrameAction& b) {
-            return a.frame < b.frame;
-            });
+    // Does the actual disk write, off the main thread, once a save path has been chosen.
+    static void writeExport(std::filesystem::path savePath, std::vector<FrameAction> exportList) {
+        std::thread([savePath, exportList]() {
+            std::string ext = savePath.extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            bool isJson = (ext == ".json");
 
-        HWND parentHwnd = GetActiveWindow();
-        if (!parentHwnd) parentHwnd = WindowFromDC(wglGetCurrentDC());
-
-        std::thread([exportList, parentHwnd]() {
-            HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-
-            char filename[MAX_PATH] = { 0 };
-            OPENFILENAMEA ofn;
-            ZeroMemory(&ofn, sizeof(ofn));
-            ofn.lStructSize = sizeof(ofn);
-            ofn.hwndOwner = parentHwnd;
-            ofn.lpstrFilter = "Frame Window Counter (*.fwc)\0*.fwc\0NANDL Calculator JSON (*.json)\0*.json\0All Files\0*.*\0";
-            ofn.lpstrFile = filename;
-            ofn.nMaxFile = MAX_PATH;
-            ofn.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
-            ofn.lpstrDefExt = "fwc";
-
-            if (GetSaveFileNameA(&ofn)) {
-                std::filesystem::path path(filename);
-                std::string ext = path.extension().string();
-                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                bool isJson = (ext == ".json" || ofn.nFilterIndex == 2);
-
-                std::ofstream f(filename, isJson ? std::ios::out : std::ios::binary);
-                if (f) {
+            std::ofstream f(savePath, isJson ? std::ios::out : std::ios::binary);
+            if (f) {
                     if (isJson) {
                         std::vector<matjson::Value> arr;
                         int inputCounter = 1;
@@ -144,36 +123,54 @@ namespace FileIO {
                         alert->show(); stopAlertAnimation(alert);
                         });
                 }
-            }
-
-            if (SUCCEEDED(hr)) CoUninitialize();
             }).detach();
-#endif
+    }
+
+    void exportFWC() {
+        std::vector<FrameAction> exportList;
+        for (auto& [k, v] : g_frameActions) exportList.push_back(v);
+
+        std::stable_sort(exportList.begin(), exportList.end(), [](const FrameAction& a, const FrameAction& b) {
+            return a.frame < b.frame;
+            });
+
+        file::FilePickOptions options;
+        options.defaultPath = Mod::get()->getSaveDir() / "export.fwc";
+        options.filters = exportFilters();
+
+        async::spawn(
+            file::pick(file::PickMode::SaveFile, options),
+            [exportList](Result<std::optional<std::filesystem::path>> result) {
+                if (!result.isOk()) return;
+                auto opt = result.unwrap();
+                if (!opt.has_value()) return; // user cancelled the dialog
+
+                writeExport(opt.value(), exportList);
+            }
+        );
     }
 
     void importReplay(std::function<void()> onSuccessCallback) {
-#ifdef GEODE_IS_WINDOWS
         loadModData();
 
-        HWND parentHwnd = GetActiveWindow();
-        if (!parentHwnd) parentHwnd = WindowFromDC(wglGetCurrentDC());
+        file::FilePickOptions options;
+        options.filters = {
+            { .description = "Supported Formats", .files = { "*.fwc", "*.json", "*.gdr", "*.gdr2", "*.slc" } },
+            { .description = "Frame Window Counter", .files = { "*.fwc" } },
+            { .description = "NANDL Calculator JSON", .files = { "*.json" } },
+            { .description = "GD Replay / Silicate", .files = { "*.gdr", "*.gdr2", "*.slc" } }
+        };
 
-        std::thread([onSuccessCallback, parentHwnd]() {
-            HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+        async::spawn(
+            file::pick(file::PickMode::OpenFile, options),
+            [onSuccessCallback](Result<std::optional<std::filesystem::path>> result) {
+                if (!result.isOk()) return;
+                auto opt = result.unwrap();
+                if (!opt.has_value()) return; // user cancelled the dialog
 
-            char filename[MAX_PATH] = { 0 };
-            OPENFILENAMEA ofn;
-            ZeroMemory(&ofn, sizeof(ofn));
-            ofn.lStructSize = sizeof(ofn);
-            ofn.hwndOwner = parentHwnd;
-            ofn.lpstrFilter = "Supported Formats\0*.fwc;*.json;*.gdr;*.gdr2;*.slc\0Frame Window Counter (*.fwc)\0*.fwc\0NANDL Calculator JSON (*.json)\0*.json\0GD Replay / Silicate (*.gdr;*.gdr2;*.slc)\0*.gdr;*.gdr2;*.slc\0All Files\0*.*\0";
-            ofn.lpstrFile = filename;
-            ofn.nMaxFile = MAX_PATH;
-            ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR;
-            ofn.lpstrDefExt = "fwc";
+                std::filesystem::path path = opt.value();
 
-            if (GetOpenFileNameA(&ofn)) {
-                std::filesystem::path path(filename);
+                std::thread([path, onSuccessCallback]() {
                 try {
                     std::vector<FrameAction> newActions;
                     double parsedFps = 240.0;
@@ -359,10 +356,8 @@ namespace FileIO {
                         alert->show(); stopAlertAnimation(alert);
                         });
                 }
+                }).detach();
             }
-
-            if (SUCCEEDED(hr)) CoUninitialize();
-            }).detach();
-#endif
+        );
     }
 }
