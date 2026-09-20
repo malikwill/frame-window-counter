@@ -1,5 +1,7 @@
 #pragma once
 #include <Geode/Geode.hpp>
+#include <vector>
+#include "InputReplayer.hpp"
 
 // 在不等待真实渲染帧的情况下，直接驱动物理模拟前进指定的 tick 数。
 // 依据：GDMegaOverlay 的 frame-step 功能证实 GJBaseGameLayer::update(dt)
@@ -14,12 +16,21 @@ namespace FastForwardRunner {
         Died
     };
 
-    // 推进恰好 `ticks` 个物理 tick。dt 应为 1.0f / TPS（通常 TPS = 240，
-    // 即 dt ≈ 1/240）。若中途检测到死亡会立即停止，不会继续推进剩余 tick。
-    //
-    // 注意：这只推进物理模拟本身，不会注入任何按键输入 —— 这是有意为之，
-    // 输入回放是独立的下一步（需要在每个 tick 前调用
-    // GJBaseGameLayer::handleButton 来重放已录制的宏数据）。
+    // 推进恰好 `ticks` 个物理 tick，不注入任何按键输入。
+    // dt 应为 1.0f / TPS（通常 TPS = 240，即 dt ≈ 1/240）。
+    // 若中途检测到死亡会立即停止，不会继续推进剩余 tick。
     Result advanceTicks(PlayLayer* pl, int ticks, float dt = 1.0f / 240.0f);
 
+    // 与上面相同，但每个 tick 会先通过 InputReplayer 重放 events 中
+    // 落在该 tick 的按键，再推进物理。startFrame 是快照时刻关卡的绝对帧号
+    // （对应 tick 0），用于把 events 里的绝对帧号对齐到本次推进的相对 tick。
+    Result advanceTicksWithReplay(
+        PlayLayer* pl,
+        int ticks,
+        int startFrame,
+        const std::vector<InputReplayer::ReplayEvent>& events,
+        float dt = 1.0f / 240.0f
+    );
+
 }
+
