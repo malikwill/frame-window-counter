@@ -16,13 +16,16 @@
       "id": "geode.node-ids",
       "version": ">=v1.22.0",
       "importance": "required"
-    },
-    {
-      "id": "geode.custom-keybinds",
-      "version": ">=v1.9.1",
-      "importance": "required"
     }
   ],
+  "settings": {
+    "editor-hotkey": {
+      "name": "Editor Hotkey",
+      "description": "Letter key (A-Z) that opens/closes the Frame Window Counter editor. Works anywhere in a level (requires a physical/Bluetooth keyboard on Android).",
+      "type": "string",
+      "default": "O"
+    }
+  },
   "links": {
     "homepage": "https://space.bilibili.com/3494358087108748",
     "source": "https://github.com/hyper-5/frame-window-counter"
