@@ -43,12 +43,20 @@ namespace WindowScanner {
         res.centerFrame = centerFrame;
 
         if (!pl || !checkpoint) {
+            geode::log::error(
+                "[FrameWindowCounter] WindowScanner: scanWindow called with null {} for action '{}', aborting",
+                !pl ? "PlayLayer" : "checkpoint", testActionKey
+            );
             return res;
         }
 
         // 中心帧本身应当是已知可行的录制帧；如果连它都失败，
         // 说明测试环境（检查点/回放数据）本身有问题，直接中止。
         if (!testCandidate(pl, checkpoint, startFrame, testActionKey, centerFrame, lookaheadTicks, dt)) {
+            geode::log::error(
+                "[FrameWindowCounter] WindowScanner: center frame {} (action '{}') failed sanity check, aborting scan",
+                centerFrame, testActionKey
+            );
             CheckpointRunner::restore(pl, checkpoint);
             return res;
         }
@@ -69,6 +77,13 @@ namespace WindowScanner {
                 break;
             }
         }
+        if (res.upperHitSearchLimit) {
+            geode::log::warn(
+                "[FrameWindowCounter] WindowScanner: upper bound search hit maxRadius ({}) without failing, "
+                "true upper bound may be higher than {}",
+                maxRadius, res.upperBound
+            );
+        }
 
         // 向前扩张：中心 -1, -2, ... 直到失败
         res.lowerHitSearchLimit = true;
@@ -82,8 +97,20 @@ namespace WindowScanner {
                 break;
             }
         }
+        if (res.lowerHitSearchLimit) {
+            geode::log::warn(
+                "[FrameWindowCounter] WindowScanner: lower bound search hit maxRadius ({}) without failing, "
+                "true lower bound may be lower than {}",
+                maxRadius, res.lowerBound
+            );
+        }
 
         res.windowSize = (res.upperBound - res.lowerBound) + 1;
+
+        geode::log::info(
+            "[FrameWindowCounter] WindowScanner: finished scan for action '{}' - bounds [{}, {}], window size {}",
+            testActionKey, res.lowerBound, res.upperBound, res.windowSize
+        );
 
         // 扫描结束后恢复到检查点，不留下任何影响实际游玩状态的残留
         CheckpointRunner::restore(pl, checkpoint);
