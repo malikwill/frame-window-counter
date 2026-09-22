@@ -34,6 +34,7 @@ protected:
     void onAddFramePrompt(cocos2d::CCObject*);
     void onClearAll(cocos2d::CCObject*);
     void onDeleteFrame(cocos2d::CCObject* sender);
+    void onScanFrame(cocos2d::CCObject* sender);
     void onOpenPrecision(cocos2d::CCObject*);
     void onToggleMod(cocos2d::CCObject* sender);
     void onSelectAll(cocos2d::CCObject*);

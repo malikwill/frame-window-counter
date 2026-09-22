@@ -6,6 +6,8 @@
 #include "../Data/State.hpp"
 #include "../IO/FileIO.hpp"
 #include "../Common.hpp"
+#include "../Scan/CheckpointRunner.hpp"
+#include "../Scan/WindowScanner.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -303,6 +305,89 @@ void FrameActionPopup::onDeleteFrame(CCObject* sender) {
     }
 }
 
+// 对某一条已录制的动作运行自动帧窗口扫描（详见 src/Scan/ 下各模块）。
+// 要求：必须已暂停在该点击发生之前的那一刻，因为扫描会以当前状态
+// 作为检查点，反复恢复并重放宏数据来探测成功边界。
+void FrameActionPopup::onScanFrame(CCObject* sender) {
+    auto btn = typeinfo_cast<CCMenuItemSpriteExtra*>(sender);
+    if (!btn) return;
+    auto strObj = static_cast<cocos2d::CCString*>(btn->getUserObject());
+    if (!strObj) return;
+    std::string actionKey = strObj->getCString();
+
+    if (!g_frameActions.contains(actionKey)) {
+        geode::log::error("[FrameWindowCounter] Scan aborted: action key '{}' not found in g_frameActions", actionKey);
+        return;
+    }
+
+    auto pl = PlayLayer::get();
+    if (!pl) {
+        geode::log::error("[FrameWindowCounter] Scan aborted: no active PlayLayer (must be paused inside a level to scan)");
+        auto alert = FLAlertLayer::create("Scan Failed", "You must be paused inside a level, right before this click, to scan it.", "OK");
+        alert->show(); stopAlertAnimation(alert);
+        return;
+    }
+
+    int centerFrame = g_frameActions[actionKey].frame;
+    int startFrame = static_cast<int>(pl->m_gameState.m_levelTime * g_macroFps);
+
+    geode::log::info(
+        "[FrameWindowCounter] Scan started for action '{}': recorded frame {}, checkpoint frame {}",
+        actionKey, centerFrame, startFrame
+    );
+
+    auto checkpoint = CheckpointRunner::snapshot(pl);
+    if (!checkpoint) {
+        geode::log::error("[FrameWindowCounter] Scan aborted: CheckpointRunner::snapshot() returned null");
+        auto alert = FLAlertLayer::create("Scan Failed", "Could not create a checkpoint at the current position.", "OK");
+        alert->show(); stopAlertAnimation(alert);
+        return;
+    }
+
+    auto result = WindowScanner::scanWindow(pl, checkpoint, startFrame, actionKey, centerFrame);
+
+    if (!result.success) {
+        geode::log::error(
+            "[FrameWindowCounter] Scan FAILED for action '{}': center frame {} did not survive scan playback "
+            "(is the game actually paused right before this click?)",
+            actionKey, centerFrame
+        );
+        auto alert = FLAlertLayer::create(
+            "Scan Failed",
+            "The recorded frame itself failed during scan playback. Make sure you're paused exactly before this click before scanning.",
+            "OK"
+        );
+        alert->show(); stopAlertAnimation(alert);
+        return;
+    }
+
+    if (result.lowerHitSearchLimit || result.upperHitSearchLimit) {
+        geode::log::warn(
+            "[FrameWindowCounter] Scan for action '{}' hit the search limit (lowerLimit={}, upperLimit={}) - "
+            "reported bounds [{}, {}], window size {} may be smaller than the true window",
+            actionKey, result.lowerHitSearchLimit, result.upperHitSearchLimit,
+            result.lowerBound, result.upperBound, result.windowSize
+        );
+    }
+    else {
+        geode::log::info(
+            "[FrameWindowCounter] Scan SUCCEEDED for action '{}': bounds [{}, {}], window size = {}",
+            actionKey, result.lowerBound, result.upperBound, result.windowSize
+        );
+    }
+
+    g_frameActions[actionKey].frameWindow = static_cast<double>(result.windowSize);
+    saveFrames();
+    this->refreshList(true);
+
+    std::string msg = fmt::format("Frame window: {} (frames {} to {})", result.windowSize, result.lowerBound, result.upperBound);
+    if (result.lowerHitSearchLimit || result.upperHitSearchLimit) {
+        msg += "\n(Warning: hit search limit - actual window may be larger. See Geode logs for details.)";
+    }
+    auto alert = FLAlertLayer::create("Scan Complete", msg.c_str(), "OK");
+    alert->show(); stopAlertAnimation(alert);
+}
+
 void FrameActionPopup::jumpToFrame(int targetFrame) {
     this->refreshList(true);
     int targetIndex = -1;
@@ -476,6 +561,9 @@ void FrameActionPopup::refreshList(bool rebuildKeys) {
                 if (auto delBtn = static_cast<CCMenuItemSpriteExtra*>(menu->getChildByID("del-btn"_spr))) {
                     delBtn->setUserObject(cocos2d::CCString::create(actionKey));
                 }
+                if (auto scanBtn = static_cast<CCMenuItemSpriteExtra*>(menu->getChildByID("scan-btn"_spr))) {
+                    scanBtn->setUserObject(cocos2d::CCString::create(actionKey));
+                }
             }
 
             if (auto winInput = static_cast<TextInput*>(cell->getChildByID("win-input"_spr))) {
@@ -597,10 +685,17 @@ CCNode* FrameActionPopup::createCellTemplate(int index) {
         });
     cell->addChild(ifInput);
 
+    auto scanSpr = CCSprite::createWithSpriteFrameName("GJ_timeIcon_001.png");
+    scanSpr->setScale(0.5f);
+    auto scanBtn = CCMenuItemSpriteExtra::create(scanSpr, this, menu_selector(FrameActionPopup::onScanFrame));
+    scanBtn->setPosition({ 336.f, 20.f });
+    scanBtn->setID("scan-btn"_spr);
+    menu->addChild(scanBtn);
+
     auto delRowSpr = CCSprite::createWithSpriteFrameName("GJ_deleteIcon_001.png");
     delRowSpr->setScale(0.55f);
     auto delRowBtn = CCMenuItemSpriteExtra::create(delRowSpr, this, menu_selector(FrameActionPopup::onDeleteFrame));
-    delRowBtn->setPosition({ 360.f, 20.f });
+    delRowBtn->setPosition({ 372.f, 20.f });
     delRowBtn->setID("del-btn"_spr);
     menu->addChild(delRowBtn);
 
