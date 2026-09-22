@@ -6,8 +6,8 @@
 #include "../Data/State.hpp"
 #include "../IO/FileIO.hpp"
 #include "../Common.hpp"
-#include "../Scan/CheckpointRunner.hpp"
-#include "../Scan/WindowScanner.hpp"
+#include "../scan/CheckpointRunner.hpp"
+#include "../scan/WindowScanner.hpp"
 #include <algorithm>
 #include <cmath>
 
